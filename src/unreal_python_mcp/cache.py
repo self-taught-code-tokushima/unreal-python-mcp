@@ -1,0 +1,305 @@
+"""
+Cache management for Unreal Python API documentation.
+
+Handles:
+- Loading/saving cached documentation
+- Converting JSON to llms.txt format
+- Searching the API index
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from datetime import datetime
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from unreal_python_mcp.unreal_connection import UnrealConnection
+
+
+# Default cache directory
+def get_cache_dir() -> Path:
+    """Get the cache directory path."""
+    cache_dir = Path.home() / ".unreal-python-mcp" / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
+
+
+class CacheManager:
+    """Manages the Unreal Python API documentation cache."""
+
+    def __init__(self, cache_dir: Path | None = None):
+        self.cache_dir = cache_dir or get_cache_dir()
+        self._toc_cache: dict | None = None
+        self._llms_index_cache: str | None = None
+        self._class_docs_cache: dict[str, dict] = {}
+
+    def get_toc_path(self) -> Path:
+        """Get the path to the cached TOC JSON file."""
+        return self.cache_dir / "toc.json"
+
+    def get_meta_path(self) -> Path:
+        """Get the path to the cache metadata file."""
+        return self.cache_dir / "meta.json"
+
+    def get_class_doc_path(self, class_name: str) -> Path:
+        """Get the path to a cached class documentation file."""
+        classes_dir = self.cache_dir / "classes"
+        classes_dir.mkdir(parents=True, exist_ok=True)
+        return classes_dir / f"{class_name}.json"
+
+    def get_llms_index_path(self) -> Path:
+        """Get the path to the cached llms.txt file."""
+        return self.cache_dir / "llms.txt"
+
+    def load_toc(self) -> dict | None:
+        """Load the cached TOC JSON."""
+        if self._toc_cache is not None:
+            return self._toc_cache
+
+        toc_path = self.get_toc_path()
+        if toc_path.exists():
+            try:
+                with open(toc_path, "r", encoding="utf-8") as f:
+                    self._toc_cache = json.load(f)
+                return self._toc_cache
+            except (json.JSONDecodeError, IOError):
+                pass
+        return None
+
+    def save_toc(self, toc: dict) -> None:
+        """Save the TOC JSON to cache."""
+        self._toc_cache = toc
+        self._llms_index_cache = None  # Invalidate llms index cache
+
+        toc_path = self.get_toc_path()
+        with open(toc_path, "w", encoding="utf-8") as f:
+            json.dump(toc, f, indent=2)
+
+        # Update metadata
+        meta = {
+            "version": "1.0",
+            "created_at": datetime.now().isoformat(),
+            "toc_entries": sum(len(v) for v in toc.values() if isinstance(v, dict)),
+        }
+        with open(self.get_meta_path(), "w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=2)
+
+    def get_llms_index(self) -> str:
+        """
+        Get the llms.txt formatted index.
+
+        If cache exists, returns cached content.
+        Otherwise, generates from TOC or returns a placeholder.
+        """
+        if self._llms_index_cache is not None:
+            return self._llms_index_cache
+
+        # Try to load from file
+        llms_path = self.get_llms_index_path()
+        if llms_path.exists():
+            try:
+                with open(llms_path, "r", encoding="utf-8") as f:
+                    self._llms_index_cache = f.read()
+                return self._llms_index_cache
+            except IOError:
+                pass
+
+        # Generate from TOC
+        toc = self.load_toc()
+        if toc:
+            self._llms_index_cache = self._generate_llms_index(toc)
+            # Save to file
+            with open(llms_path, "w", encoding="utf-8") as f:
+                f.write(self._llms_index_cache)
+            return self._llms_index_cache
+
+        # Return placeholder
+        return self._get_placeholder_llms_index()
+
+    def _get_placeholder_llms_index(self) -> str:
+        """Return a placeholder llms.txt when no cache is available."""
+        return """# Unreal Python API
+> Status: Cache not initialized
+> Action: Run `refresh_api_cache` tool with Unreal Editor running
+
+## How to Initialize
+
+1. Start Unreal Editor with a project
+2. Enable Python Remote Execution in Editor Preferences > Plugins > Python
+3. Use the `refresh_api_cache` tool to fetch and cache the API documentation
+
+## Available Tools
+
+- `refresh_api_cache`: Fetch API documentation from Unreal Editor
+- `search_unreal_api`: Search the API index
+- `get_unreal_class`: Get detailed class documentation
+- `exec_unreal_python`: Execute Python code in Unreal Editor
+- `list_unreal_instances`: List available Unreal Editor instances
+"""
+
+    def _generate_llms_index(self, toc: dict) -> str:
+        """
+        Generate llms.txt format from TOC JSON.
+
+        TOC format (from build_toc.py):
+        {
+            "Class": {"ClassName": {"func": [...], "cls_func": [...], "prop": [...], "const": [...]}},
+            "Enum": {"EnumName": {"const": [...]}},
+            "Struct": {...},
+            "Delegate": {...},
+            "Native": {...}
+        }
+        """
+        lines = [
+            "# Unreal Python API",
+            f"> Generated: {datetime.now().strftime('%Y-%m-%d')}",
+            "",
+        ]
+
+        # Classes
+        if "Class" in toc and toc["Class"]:
+            lines.append("## Classes")
+            lines.append("")
+            for class_name, members in sorted(toc["Class"].items()):
+                func_count = len(members.get("func", []))
+                prop_count = len(members.get("prop", []))
+                lines.append(f"- [{class_name}](/class/{class_name}): {func_count} methods, {prop_count} properties")
+            lines.append("")
+
+        # Enums
+        if "Enum" in toc and toc["Enum"]:
+            lines.append("## Enums")
+            lines.append("")
+            for enum_name, members in sorted(toc["Enum"].items()):
+                const_count = len(members.get("const", []))
+                lines.append(f"- [{enum_name}](/enum/{enum_name}): {const_count} values")
+            lines.append("")
+
+        # Structs
+        if "Struct" in toc and toc["Struct"]:
+            lines.append("## Structs")
+            lines.append("")
+            for struct_name, members in sorted(toc["Struct"].items()):
+                prop_count = len(members.get("prop", []))
+                lines.append(f"- [{struct_name}](/struct/{struct_name}): {prop_count} properties")
+            lines.append("")
+
+        # Delegates
+        if "Delegate" in toc and toc["Delegate"]:
+            lines.append("## Delegates")
+            lines.append("")
+            for delegate_name in sorted(toc["Delegate"].keys()):
+                lines.append(f"- [{delegate_name}](/delegate/{delegate_name})")
+            lines.append("")
+
+        # Native (functions)
+        if "Native" in toc and toc["Native"]:
+            lines.append("## Functions")
+            lines.append("")
+            for func_name in sorted(toc["Native"].keys()):
+                lines.append(f"- [{func_name}](/func/{func_name})")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def search_api(self, query: str, max_results: int = 20) -> list[str]:
+        """
+        Search the API index for matching entries.
+
+        Args:
+            query: Search query (supports partial matching and regex)
+            max_results: Maximum number of results to return
+        """
+        toc = self.load_toc()
+        if not toc:
+            return ["Cache not initialized. Use refresh_api_cache tool first."]
+
+        results = []
+        try:
+            pattern = re.compile(query, re.IGNORECASE)
+        except re.error:
+            # If invalid regex, use simple substring matching
+            pattern = None
+
+        for category, items in toc.items():
+            if not isinstance(items, dict):
+                continue
+
+            for name, members in items.items():
+                matched = False
+                if pattern:
+                    matched = pattern.search(name) is not None
+                else:
+                    matched = query.lower() in name.lower()
+
+                if matched:
+                    member_info = []
+                    if members.get("func"):
+                        member_info.append(f"{len(members['func'])} methods")
+                    if members.get("prop"):
+                        member_info.append(f"{len(members['prop'])} props")
+                    if members.get("const"):
+                        member_info.append(f"{len(members['const'])} consts")
+
+                    info = f"[{category}] {name}"
+                    if member_info:
+                        info += f" ({', '.join(member_info)})"
+                    results.append(info)
+
+                    if len(results) >= max_results:
+                        break
+
+            if len(results) >= max_results:
+                break
+
+        return results
+
+    def get_class_doc(self, class_name: str) -> dict | None:
+        """
+        Get detailed documentation for a class.
+
+        First checks memory cache, then file cache.
+        """
+        if class_name in self._class_docs_cache:
+            return self._class_docs_cache[class_name]
+
+        doc_path = self.get_class_doc_path(class_name)
+        if doc_path.exists():
+            try:
+                with open(doc_path, "r", encoding="utf-8") as f:
+                    doc = json.load(f)
+                self._class_docs_cache[class_name] = doc
+                return doc
+            except (json.JSONDecodeError, IOError):
+                pass
+
+        return None
+
+    def save_class_doc(self, class_name: str, doc: dict) -> None:
+        """Save class documentation to cache."""
+        self._class_docs_cache[class_name] = doc
+        doc_path = self.get_class_doc_path(class_name)
+        with open(doc_path, "w", encoding="utf-8") as f:
+            json.dump(doc, f, indent=2)
+
+    def refresh_from_unreal(self, conn: "UnrealConnection") -> None:
+        """
+        Refresh the cache by fetching documentation from Unreal Editor.
+
+        Args:
+            conn: UnrealConnection instance for communicating with Unreal
+        """
+        # Fetch TOC
+        toc_json = conn.fetch_toc()
+        if toc_json:
+            toc = json.loads(toc_json)
+            self.save_toc(toc)
+
+        # Clear llms index cache to regenerate
+        self._llms_index_cache = None
+        llms_path = self.get_llms_index_path()
+        if llms_path.exists():
+            llms_path.unlink()

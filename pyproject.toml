@@ -1,0 +1,20 @@
+[project]
+name = "unreal-python-mcp"
+version = "0.1.0"
+description = "MCP server for Unreal Python API documentation and execution"
+readme = "README.md"
+authors = [
+    { name = "dany14681", email = "dany1468@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "mcp[cli]>=1.25.0",
+    "upyrc>=0.12.0",
+]
+
+[project.scripts]
+unreal-python-mcp = "unreal_python_mcp.server:main"
+
+[build-system]
+requires = ["uv_build>=0.9.24,<0.10.0"]
+build-backend = "uv_build"
