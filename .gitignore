@@ -8,3 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Claude files to be ignored
+.mcp.json
+.claude/tmp/

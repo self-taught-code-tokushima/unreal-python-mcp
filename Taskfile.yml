@@ -1,0 +1,257 @@
+# https://taskfile.dev
+
+version: '3'
+
+run: once
+
+vars:
+  # Unreal Engine paths
+  UE_ENGINE_PATH: D:\UE\UE_5.7
+  UE_BUILD_BAT: "{{.UE_ENGINE_PATH}}\\Engine\\Build\\BatchFiles\\Build.bat"
+  UE_EDITOR_CMD: "{{.UE_ENGINE_PATH}}\\Engine\\Binaries\\Win64\\UnrealEditor-Cmd.exe"
+  UE_PYTHON_PATH: "{{.UE_ENGINE_PATH}}\\Engine\\Binaries\\ThirdParty\\Python3\\Win64\\python.exe"
+
+  # Project configuration
+  PROJECT_NAME: SampleProject
+  PROJECT_ROOT_PATH: "{{.ROOT_DIR}}\\{{.PROJECT_NAME}}"
+  PROJECT_PATH: "{{.ROOT_DIR}}\\{{.PROJECT_NAME}}\\{{.PROJECT_NAME}}.uproject"
+  BUILD_TARGET: "{{.PROJECT_NAME}}Editor"
+  BUILD_PLATFORM: Win64
+  BUILD_CONFIG: Development
+  PROJECT_PYTHON_STUB: "{{.PROJECT_ROOT_PATH}}\\Intermediate\\PythonStub"
+
+  # Temporary files
+  TMP_DIR: "{{.ROOT_DIR}}\\.claude\\tmp"
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  # ========================================
+  # MCP Server Tasks (Python)
+  # ========================================
+
+  mcp-server:run:
+    desc: Run the Python MCP server (local development)
+    cmds:
+      - uv run unreal-python-mcp
+
+  mcp-server:dev:
+    desc: Run MCP dev server with inspector
+    cmds:
+      - uv run mcp dev src/unreal_python_mcp/server.py
+
+  # ========================================
+  # Cache Management Tasks
+  # ========================================
+
+  cache:refresh:
+    desc: Refresh API cache from running Unreal Editor
+    cmds:
+      - |
+        uv run python -c "
+        from unreal_python_mcp.unreal_connection import UnrealConnection
+        from unreal_python_mcp.cache import CacheManager
+
+        conn = UnrealConnection()
+        cache = CacheManager()
+
+        print('Checking Unreal Editor...')
+        print(conn.list_instances())
+        print()
+
+        print('Refreshing cache...')
+        cache.refresh_from_unreal(conn)
+        print('Done!')
+        print()
+
+        # Show stats
+        toc = cache.load_toc()
+        if toc:
+            print('=== Cache Statistics ===')
+            print(f'  Classes: {len(toc.get(\"Class\", {}))}')
+            print(f'  Structs: {len(toc.get(\"Struct\", {}))}')
+            print(f'  Enums: {len(toc.get(\"Enum\", {}))}')
+            print(f'  Delegates: {len(toc.get(\"Delegate\", {}))}')
+            print()
+
+            # Show module stats
+            modules = cache.get_modules()
+            print(f'=== Modules ({len(modules)} total) ===')
+            sorted_modules = sorted(modules.items(), key=lambda x: -len(x[1]))
+            for mod, classes in sorted_modules[:10]:
+                print(f'  {mod}: {len(classes)} classes')
+            if len(modules) > 10:
+                print(f'  ... and {len(modules) - 10} more modules')
+            print()
+
+            # Show resource sizes
+            print('=== Resource Sizes ===')
+            summary = cache.get_summary()
+            print(f'  index/summary: {len(summary):,} bytes')
+            engine_idx = cache.get_module_index('Engine')
+            print(f'  index/module/Engine: {len(engine_idx):,} bytes')
+            enums_idx = cache.get_enums_index()
+            print(f'  index/enums: {len(enums_idx):,} bytes')
+            structs_idx = cache.get_structs_index()
+            print(f'  index/structs: {len(structs_idx):,} bytes')
+        "
+
+  cache:check:
+    desc: Check cache status and show statistics
+    cmds:
+      - |
+        uv run python -c "
+        import json
+        from pathlib import Path
+        from unreal_python_mcp.cache import CacheManager, get_cache_dir
+
+        cache = CacheManager()
+        cache_dir = get_cache_dir()
+
+        print(f'Cache directory: {cache_dir}')
+        print()
+
+        # Check toc.json
+        toc_path = cache.get_toc_path()
+        if toc_path.exists():
+            toc = cache.load_toc()
+            print(f'toc.json: EXISTS ({toc_path.stat().st_size:,} bytes)')
+            if toc:
+                for category, items in toc.items():
+                    if isinstance(items, dict):
+                        print(f'  {category}: {len(items)} entries')
+            print()
+
+            # Show hierarchical resource info
+            print('=== Hierarchical Resources (generated from toc.json) ===')
+            summary = cache.get_summary()
+            print(f'  index/summary: {len(summary):,} bytes')
+
+            modules = cache.get_modules()
+            print(f'  index/module/[name]: {len(modules)} modules available')
+
+            enums_idx = cache.get_enums_index()
+            print(f'  index/enums: {len(enums_idx):,} bytes')
+
+            structs_idx = cache.get_structs_index()
+            print(f'  index/structs: {len(structs_idx):,} bytes')
+
+            delegates_idx = cache.get_delegates_index()
+            print(f'  index/delegates: {len(delegates_idx):,} bytes')
+        else:
+            print('toc.json: NOT FOUND')
+            print('Run \"task cache:refresh\" to initialize the cache.')
+        print()
+
+        # Check classes folder
+        classes_dir = cache_dir / 'classes'
+        if classes_dir.exists():
+            class_files = list(classes_dir.glob('*.json'))
+            print(f'classes/: {len(class_files)} cached class docs')
+        else:
+            print('classes/: (empty - class docs are fetched on demand)')
+        print()
+
+        # Check meta.json
+        meta_path = cache.get_meta_path()
+        if meta_path.exists():
+            with open(meta_path, 'r', encoding='utf-8') as f:
+                meta = json.load(f)
+            print(f'Last updated: {meta.get(\"created_at\", \"unknown\")}')
+        "
+
+  cache:clear:
+    desc: Clear the API cache
+    cmds:
+      - |
+        uv run python -c "
+        from pathlib import Path
+        from unreal_python_mcp.cache import get_cache_dir
+        import shutil
+
+        cache_dir = get_cache_dir()
+        if cache_dir.exists():
+            shutil.rmtree(cache_dir)
+            print(f'Cleared cache: {cache_dir}')
+        else:
+            print('Cache directory does not exist')
+        "
+
+  cache:show-summary:
+    desc: Show the API summary (recommended starting point for LLMs)
+    cmds:
+      - |
+        uv run python -c "
+        from unreal_python_mcp.cache import CacheManager
+
+        cache = CacheManager()
+        print(cache.get_summary())
+        "
+
+  cache:show-module:
+    desc: Show classes for a module (use MODULE env var, default=Engine)
+    cmds:
+      - |
+        uv run python -c "
+        import os
+        from unreal_python_mcp.cache import CacheManager
+
+        module = os.environ.get('MODULE', 'Engine')
+        cache = CacheManager()
+        index = cache.get_module_index(module)
+        lines = index.split('\n')[:50]
+        print('\n'.join(lines))
+        if len(index.split('\n')) > 50:
+            print(f'\n... ({len(index.split(chr(10)))} total lines)')
+        "
+
+  cache:list-modules:
+    desc: List all available modules with class counts
+    cmds:
+      - |
+        uv run python -c "
+        from unreal_python_mcp.cache import CacheManager
+
+        cache = CacheManager()
+        modules = cache.get_modules()
+
+        if not modules:
+            print('Cache not initialized. Run \"task cache:refresh\" first.')
+        else:
+            print(f'Available modules ({len(modules)} total):')
+            print()
+            sorted_modules = sorted(modules.items(), key=lambda x: -len(x[1]))
+            for mod, classes in sorted_modules:
+                print(f'  {mod}: {len(classes)} classes')
+        "
+
+  # ========================================
+  # Unreal Editor Tasks
+  # ========================================
+
+  unreal:list:
+    desc: List running Unreal Editor instances
+    cmds:
+      - |
+        uv run python -c "
+        from unreal_python_mcp.unreal_connection import UnrealConnection
+        conn = UnrealConnection()
+        print(conn.list_instances())
+        "
+
+  unreal:exec:
+    desc: Execute Python code in Unreal Editor (use CODE env var)
+    cmds:
+      - |
+        uv run python -c "
+        import os
+        from unreal_python_mcp.unreal_connection import UnrealConnection
+
+        code = os.environ.get('CODE', 'print(\"Hello from Unreal!\")')
+        conn = UnrealConnection()
+        result = conn.execute(code)
+        print(result)
+        "

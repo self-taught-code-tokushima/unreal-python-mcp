@@ -4,6 +4,7 @@ Cache management for Unreal Python API documentation.
 Handles:
 - Loading/saving cached documentation
 - Converting JSON to llms.txt format
+- Generating hierarchical indexes (summary, module-based, category-based)
 - Searching the API index
 """
 
@@ -11,6 +12,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -30,11 +32,16 @@ def get_cache_dir() -> Path:
 class CacheManager:
     """Manages the Unreal Python API documentation cache."""
 
-    def __init__(self, cache_dir: Path | None = None):
+    def __init__(self, cache_dir: Path | None = None, unreal_connection: "UnrealConnection | None" = None):
         self.cache_dir = cache_dir or get_cache_dir()
         self._toc_cache: dict | None = None
         self._llms_index_cache: str | None = None
         self._class_docs_cache: dict[str, dict] = {}
+        self._unreal_connection: "UnrealConnection | None" = unreal_connection
+
+    def set_unreal_connection(self, conn: "UnrealConnection") -> None:
+        """Set the Unreal connection for lazy loading."""
+        self._unreal_connection = conn
 
     def get_toc_path(self) -> Path:
         """Get the path to the cached TOC JSON file."""
@@ -261,11 +268,13 @@ class CacheManager:
         """
         Get detailed documentation for a class.
 
-        First checks memory cache, then file cache.
+        First checks memory cache, then file cache, then fetches from Unreal.
         """
+        # Check memory cache
         if class_name in self._class_docs_cache:
             return self._class_docs_cache[class_name]
 
+        # Check file cache
         doc_path = self.get_class_doc_path(class_name)
         if doc_path.exists():
             try:
@@ -275,6 +284,17 @@ class CacheManager:
                 return doc
             except (json.JSONDecodeError, IOError):
                 pass
+
+        # Fetch from Unreal (lazy loading)
+        if self._unreal_connection is not None:
+            doc_json = self._unreal_connection.fetch_class_doc(class_name)
+            if doc_json:
+                try:
+                    doc = json.loads(doc_json)
+                    self.save_class_doc(class_name, doc)
+                    return doc
+                except json.JSONDecodeError:
+                    pass
 
         return None
 
@@ -303,3 +323,221 @@ class CacheManager:
         llms_path = self.get_llms_index_path()
         if llms_path.exists():
             llms_path.unlink()
+
+    # ========================================================================
+    # Hierarchical Index Generation
+    # ========================================================================
+
+    def get_modules(self) -> dict[str, list[str]]:
+        """
+        Get a mapping of module names to class names.
+
+        Returns:
+            Dict mapping module name to list of class names
+        """
+        toc = self.load_toc()
+        if not toc:
+            return {}
+
+        modules: dict[str, list[str]] = defaultdict(list)
+        classes = toc.get("Class", {})
+
+        for class_name, class_data in classes.items():
+            module = class_data.get("module", "Other")
+            modules[module].append(class_name)
+
+        # Sort class names within each module
+        for module in modules:
+            modules[module].sort()
+
+        return dict(modules)
+
+    def get_summary(self) -> str:
+        """
+        Get a lightweight summary of the API.
+
+        Returns:
+            Summary text (~2KB) with category counts and module list
+        """
+        toc = self.load_toc()
+        if not toc:
+            return self._get_placeholder_summary()
+
+        lines = [
+            "# Unreal Python API Summary",
+            f"> Generated: {datetime.now().strftime('%Y-%m-%d')}",
+            "",
+            "## Categories",
+            "",
+        ]
+
+        # Category counts
+        for category in ["Class", "Struct", "Enum", "Delegate", "Function", "Native"]:
+            items = toc.get(category, {})
+            if items:
+                lines.append(f"- {category}: {len(items)} entries")
+
+        lines.append("")
+        lines.append("## Class Modules")
+        lines.append("")
+        lines.append("Classes are organized by module. Use `unreal-python://index/module/{name}` to get classes for a specific module.")
+        lines.append("")
+
+        # Module list with counts
+        modules = self.get_modules()
+        sorted_modules = sorted(modules.items(), key=lambda x: -len(x[1]))
+
+        for module, classes in sorted_modules[:30]:  # Top 30 modules
+            lines.append(f"- **{module}**: {len(classes)} classes")
+
+        if len(sorted_modules) > 30:
+            remaining = len(sorted_modules) - 30
+            lines.append(f"- ... and {remaining} more modules")
+
+        lines.append("")
+        lines.append("## Other Resources")
+        lines.append("")
+        lines.append("- `unreal-python://index/enums` - All enums")
+        lines.append("- `unreal-python://index/structs` - All structs")
+        lines.append("- `unreal-python://index/delegates` - All delegates")
+        lines.append("")
+        lines.append("## Tools")
+        lines.append("")
+        lines.append("- `search_unreal_api(query)` - Search by name")
+        lines.append("- `get_unreal_class(name)` - Get detailed class documentation")
+
+        return "\n".join(lines)
+
+    def _get_placeholder_summary(self) -> str:
+        """Return a placeholder summary when no cache is available."""
+        return """# Unreal Python API Summary
+> Status: Cache not initialized
+> Action: Run `refresh_api_cache` tool with Unreal Editor running
+
+## How to Initialize
+
+1. Start Unreal Editor with a project
+2. Enable Python Remote Execution in Editor Preferences > Plugins > Python
+3. Use the `refresh_api_cache` tool to fetch and cache the API documentation
+"""
+
+    def get_module_index(self, module_name: str) -> str:
+        """
+        Get the class index for a specific module.
+
+        Args:
+            module_name: The module name (e.g., "Engine", "UnrealEd")
+
+        Returns:
+            Formatted index of classes in the module
+        """
+        toc = self.load_toc()
+        if not toc:
+            return f"Cache not initialized. Use refresh_api_cache tool first."
+
+        modules = self.get_modules()
+        if module_name not in modules:
+            available = ", ".join(sorted(modules.keys())[:10])
+            return f"Module '{module_name}' not found. Available modules include: {available}..."
+
+        lines = [
+            f"# {module_name} Module Classes",
+            f"> {len(modules[module_name])} classes",
+            "",
+        ]
+
+        classes = toc.get("Class", {})
+        for class_name in modules[module_name]:
+            class_data = classes.get(class_name, {})
+            func_count = len(class_data.get("func", []))
+            prop_count = len(class_data.get("prop", []))
+            lines.append(f"- [{class_name}](/class/{class_name}): {func_count} methods, {prop_count} properties")
+
+        return "\n".join(lines)
+
+    def get_enums_index(self) -> str:
+        """
+        Get the index of all enums.
+
+        Returns:
+            Formatted index of enums
+        """
+        toc = self.load_toc()
+        if not toc:
+            return "Cache not initialized. Use refresh_api_cache tool first."
+
+        enums = toc.get("Enum", {})
+        lines = [
+            "# Unreal Python Enums",
+            f"> {len(enums)} enums",
+            "",
+        ]
+
+        for enum_name in sorted(enums.keys()):
+            enum_data = enums.get(enum_name, {})
+            const_count = len(enum_data.get("const", []))
+            lines.append(f"- {enum_name}: {const_count} values")
+
+        return "\n".join(lines)
+
+    def get_structs_index(self) -> str:
+        """
+        Get the index of all structs.
+
+        Returns:
+            Formatted index of structs
+        """
+        toc = self.load_toc()
+        if not toc:
+            return "Cache not initialized. Use refresh_api_cache tool first."
+
+        structs = toc.get("Struct", {})
+        lines = [
+            "# Unreal Python Structs",
+            f"> {len(structs)} structs",
+            "",
+        ]
+
+        for struct_name in sorted(structs.keys()):
+            struct_data = structs.get(struct_name, {})
+            prop_count = len(struct_data.get("prop", []))
+            func_count = len(struct_data.get("func", []))
+            if func_count > 0:
+                lines.append(f"- {struct_name}: {prop_count} properties, {func_count} methods")
+            else:
+                lines.append(f"- {struct_name}: {prop_count} properties")
+
+        return "\n".join(lines)
+
+    def get_delegates_index(self) -> str:
+        """
+        Get the index of all delegates.
+
+        Returns:
+            Formatted index of delegates
+        """
+        toc = self.load_toc()
+        if not toc:
+            return "Cache not initialized. Use refresh_api_cache tool first."
+
+        delegates = toc.get("Delegate", {})
+        lines = [
+            "# Unreal Python Delegates",
+            f"> {len(delegates)} delegates",
+            "",
+        ]
+
+        for delegate_name in sorted(delegates.keys()):
+            lines.append(f"- {delegate_name}")
+
+        return "\n".join(lines)
+
+    def list_modules(self) -> list[str]:
+        """
+        List all available modules sorted by class count.
+
+        Returns:
+            List of module names
+        """
+        modules = self.get_modules()
+        return sorted(modules.keys(), key=lambda m: -len(modules[m]))

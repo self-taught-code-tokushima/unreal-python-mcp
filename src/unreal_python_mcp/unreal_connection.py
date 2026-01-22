@@ -163,67 +163,126 @@ class UnrealConnection:
             JSON string of the TOC, or None if failed
         """
         # build_toc.py の get_table_of_content_json() を実行
+        # オリジナルの vscode-unreal-python/python/documentation/build_toc.py と同じロジック
+        # Module 情報を追加して返す
         code = '''
+import warnings
 import inspect
 import types
 import json
 import unreal
 
+def issubclass_strict(cls, class_or_tuple):
+    if not issubclass(cls, class_or_tuple):
+        return False
+    if isinstance(class_or_tuple, tuple):
+        return cls not in class_or_tuple
+    return cls is not class_or_tuple
+
+def get_module_name(cls):
+    """Extract module name from static_class().get_path_name()."""
+    if hasattr(cls, 'static_class'):
+        try:
+            sc = cls.static_class()
+            if sc:
+                path = sc.get_path_name()
+                # /Script/ModuleName.ClassName -> ModuleName
+                if path.startswith('/Script/'):
+                    parts = path[8:].split('.')
+                    if len(parts) >= 1:
+                        return parts[0]
+        except:
+            pass
+    return None
+
 class UnrealClassRepresentation:
-    def __init__(self, name, obj):
+    def __init__(self, name, cls):
         self.name = name
-        self.obj = obj
+        self.cls = cls
+        self.module = get_module_name(cls)
         self.methods = []
-        self.class_methods = []
+        self.classmethods = []
         self.properties = []
         self.constants = []
-        self._categorize_members()
+        self.load_members()
 
-    def _categorize_members(self):
-        for member_name, member in inspect.getmembers(self.obj):
-            if member_name.startswith('_'):
+    def load_members(self):
+        for name, member in inspect.getmembers(self.cls):
+            if name.startswith("_"):
                 continue
-            if isinstance(member, property):
-                self.properties.append(member_name)
-            elif inspect.isfunction(member) or inspect.ismethod(member):
-                self.methods.append(member_name)
-            elif isinstance(member, classmethod) or (inspect.isbuiltin(member) and 'method' in str(type(member))):
-                self.class_methods.append(member_name)
-            elif not callable(member):
-                self.constants.append(member_name)
+            # ignore inherited methods / properties
+            if name not in self.cls.__dict__:
+                continue
 
-    def to_dict(self):
-        return {
-            "func": self.methods,
-            "cls_func": self.class_methods,
-            "prop": self.properties,
-            "const": self.constants
-        }
+            if inspect.ismethoddescriptor(member):
+                self.methods.append(name)
+            elif inspect.isgetsetdescriptor(member):
+                self.properties.append(name)
+            elif issubclass(type(member), unreal.EnumBase):
+                self.properties.append(name)
+            elif issubclass(type(member), unreal.StructBase):
+                self.properties.append(name)
+            elif inspect.isbuiltin(member):
+                self.classmethods.append(name)
+            elif inspect.ismemberdescriptor(member):
+                self.properties.append(name)
+            elif isinstance(member, int):
+                self.constants.append(name)
 
-def get_table_of_content():
-    toc = {"Class": {}, "Enum": {}, "Struct": {}, "Delegate": {}, "Native": {}}
+    def get_dict(self):
+        data = {}
+        if self.module:
+            data["module"] = self.module
+        for object_type, object_list in (("func", self.methods),
+                                         ("cls_func", self.classmethods),
+                                         ("prop", self.properties),
+                                         ("const", self.constants)):
+            if object_list:
+                data[object_type] = object_list
+        return data
 
-    for name, obj in inspect.getmembers(unreal):
-        if name.startswith('_'):
-            continue
+class TableOfContents:
+    def __init__(self):
+        self.classes = []
+        self.enums = []
+        self.struct = []
+        self.delegates = []
+        self.natives = []
+        self.functions = []
 
-        if inspect.isclass(obj):
-            if issubclass(obj, unreal.EnumBase):
-                toc["Enum"][name] = {"const": [m for m in dir(obj) if not m.startswith('_') and m.isupper()]}
-            elif issubclass(obj, unreal.StructBase):
-                rep = UnrealClassRepresentation(name, obj)
-                toc["Struct"][name] = rep.to_dict()
-            elif issubclass(obj, (unreal.DelegateBase, unreal.MulticastDelegateBase)):
-                toc["Delegate"][name] = {}
-            else:
-                rep = UnrealClassRepresentation(name, obj)
-                toc["Class"][name] = rep.to_dict()
-        elif callable(obj):
-            toc["Native"][name] = {}
+    def load(self):
+        for object_name, obj in inspect.getmembers(unreal):
+            if inspect.isclass(obj):
+                classobject = UnrealClassRepresentation(object_name, obj)
+                if issubclass_strict(obj, unreal.EnumBase):
+                    self.enums.append(classobject)
+                elif issubclass_strict(obj, unreal.StructBase):
+                    self.struct.append(classobject)
+                elif issubclass_strict(obj, (unreal.DelegateBase, unreal.MulticastDelegateBase)):
+                    self.delegates.append(classobject)
+                elif issubclass_strict(obj, unreal.Object):
+                    self.classes.append(classobject)
+                else:
+                    self.natives.append(classobject)
+            elif inspect.isfunction(obj) or isinstance(obj, types.BuiltinFunctionType):
+                self.functions.append((object_name, obj))
 
-    return toc
+    def get_dict(self):
+        data = {}
+        for name, object_list in (("Native", self.natives),
+                                  ("Struct", self.struct),
+                                  ("Class", self.classes),
+                                  ("Enum", self.enums),
+                                  ("Delegate", self.delegates)):
+            data[name] = {x.name: x.get_dict() for x in object_list}
+        data["Function"] = {name: {} for name, func in self.functions}
+        return data
 
-result = json.dumps(get_table_of_content())
+toc = TableOfContents()
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    toc.load()
+result = json.dumps(toc.get_dict(), separators=(',', ':'))
 print(result)
 '''
         output = self.execute(code)
