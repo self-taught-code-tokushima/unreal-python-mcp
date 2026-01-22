@@ -11,7 +11,7 @@ Enables AI coding assistants like Claude Code to:
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/unreal-python-mcp.git
+git clone https://github.com/self-taught-code-tokushima/unreal-python-mcp.git
 cd unreal-python-mcp
 
 # Install with uv
@@ -52,7 +52,7 @@ Add to your Claude Code MCP configuration (`~/.config/claude/mcp.json` or projec
 
 ## Available Resources
 
-### Hierarchical Index (Recommended)
+### Hierarchical Index
 
 Classes are organized by module to minimize context usage.
 
@@ -75,12 +75,6 @@ Common modules:
 | Resource | Description |
 |----------|-------------|
 | `unreal-python://class/{name}` | Detailed class documentation |
-
-### Legacy (Deprecated)
-
-| Resource | Size | Description |
-|----------|------|-------------|
-| `unreal-python://llms-index` | ~700KB | Full API index (may consume too much context) |
 
 ## Usage Example
 
