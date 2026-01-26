@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "mcp__unreal-python"
+      "mcp__unreal-python",
+      "Bash(python:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

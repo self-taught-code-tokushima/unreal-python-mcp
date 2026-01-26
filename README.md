@@ -44,7 +44,9 @@ Add to your Claude Code MCP configuration (`~/.config/claude/mcp.json` or projec
 | Tool | Description |
 |------|-------------|
 | `search_unreal_api` | Search API by class/function name |
-| `get_unreal_class` | Get detailed class documentation |
+| `get_class_overview` | Get class overview (member name lists, 1-3KB) |
+| `get_member_info` | Get detailed info for a specific member |
+| `get_members_info` | Get detailed info for multiple members (batch) |
 | `list_modules` | List available Unreal modules |
 | `exec_unreal_python` | Execute Python code in Unreal Editor |
 | `list_unreal_instances` | List available Unreal Editor instances |
@@ -89,7 +91,10 @@ Claude: [Reads unreal-python://index/summary]
         [Reads unreal-python://index/module/Engine]
         → Actor: 145 methods, 48 properties
 
-        [Uses get_unreal_class("Actor")]
+        [Uses get_class_overview("Actor")]
+        → メソッド名一覧を取得（1-2KB程度）
+
+        [Uses get_member_info("Actor", "get_actor_location")]
         → 詳細ドキュメントを取得
 
         Actor の位置を取得するには get_actor_location() を使います。
@@ -103,7 +108,8 @@ Claude: [Reads unreal-python://index/summary]
         → UnrealEd モジュールにあることを確認
 
         [Reads unreal-python://index/module/UnrealEd]
-        [Uses get_unreal_class("EditorAssetLibrary")]
+        [Uses get_class_overview("EditorAssetLibrary")]
+        → メソッド名一覧を取得
 
         EditorAssetLibrary はエディタ専用のアセット操作ユーティリティです...
 ```

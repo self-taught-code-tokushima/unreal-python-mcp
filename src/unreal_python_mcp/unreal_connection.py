@@ -303,6 +303,103 @@ print(result)
 
         return None
 
+    def fetch_class_basic_info(self, class_name: str) -> str | None:
+        """
+        Fetch only basic info (doc and bases) for a class - lightweight query.
+
+        Args:
+            class_name: The class name to fetch basic info for
+
+        Returns:
+            JSON string with name, doc, and bases only, or None if failed
+        """
+        code = f'''
+import inspect
+import json
+import unreal
+
+obj = getattr(unreal, "{class_name}", None)
+if obj is not None:
+    result = {{
+        "name": "{class_name}",
+        "doc": inspect.getdoc(obj) or "",
+        "bases": [b.__name__ for b in getattr(obj, '__bases__', []) if hasattr(b, '__name__')]
+    }}
+    print(json.dumps(result))
+else:
+    print("null")
+'''
+        output = self.execute(code)
+
+        if output and not output.startswith("Error"):
+            try:
+                start = output.index("{")
+                end = output.rindex("}") + 1
+                json_str = output[start:end]
+                import json
+                json.loads(json_str)
+                return json_str
+            except (ValueError, json.JSONDecodeError):
+                pass
+
+        return None
+
+    def fetch_member_info(self, class_name: str, member_name: str) -> str | None:
+        """
+        Fetch detailed info for a specific member of a class.
+
+        Args:
+            class_name: The class name
+            member_name: The member name (method, property, or constant)
+
+        Returns:
+            JSON string with member details, or None if failed
+        """
+        code = f'''
+import inspect
+import json
+import unreal
+
+obj = getattr(unreal, "{class_name}", None)
+if obj is not None:
+    member = getattr(obj, "{member_name}", None)
+    if member is not None:
+        result = {{"name": "{member_name}"}}
+        result["doc"] = inspect.getdoc(member) or ""
+
+        if isinstance(member, property):
+            result["type"] = "property"
+        elif callable(member):
+            result["type"] = "method"
+            try:
+                result["signature"] = str(inspect.signature(member))
+            except (ValueError, TypeError):
+                result["signature"] = "()"
+        else:
+            result["type"] = "constant"
+            result["value"] = repr(member)[:100]
+
+        print(json.dumps(result))
+    else:
+        print("null")
+else:
+    print("null")
+'''
+        output = self.execute(code)
+
+        if output and not output.startswith("Error"):
+            try:
+                start = output.index("{")
+                end = output.rindex("}") + 1
+                json_str = output[start:end]
+                import json
+                json.loads(json_str)
+                return json_str
+            except (ValueError, json.JSONDecodeError):
+                pass
+
+        return None
+
     def fetch_class_doc(self, class_name: str) -> str | None:
         """
         Fetch detailed documentation for a specific class.

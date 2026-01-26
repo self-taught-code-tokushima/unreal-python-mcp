@@ -142,7 +142,9 @@ class CacheManager:
 
 - `refresh_api_cache`: Fetch API documentation from Unreal Editor
 - `search_unreal_api`: Search the API index
-- `get_unreal_class`: Get detailed class documentation
+- `get_class_overview`: Get class overview (member name lists, 1-3KB)
+- `get_member_info`: Get detailed info for a specific member
+- `get_members_info`: Get detailed info for multiple members (batch)
 - `exec_unreal_python`: Execute Python code in Unreal Editor
 - `list_unreal_instances`: List available Unreal Editor instances
 """
@@ -404,7 +406,9 @@ class CacheManager:
         lines.append("## Tools")
         lines.append("")
         lines.append("- `search_unreal_api(query)` - Search by name")
-        lines.append("- `get_unreal_class(name)` - Get detailed class documentation")
+        lines.append("- `get_class_overview(name)` - Get class overview (member name lists)")
+        lines.append("- `get_member_info(class, member)` - Get detailed member documentation")
+        lines.append("- `get_members_info(class, members)` - Batch get member documentation")
 
         return "\n".join(lines)
 
@@ -541,3 +545,95 @@ class CacheManager:
         """
         modules = self.get_modules()
         return sorted(modules.keys(), key=lambda m: -len(modules[m]))
+
+    def get_class_overview(self, class_name: str, include_doc: bool = False) -> dict | None:
+        """
+        Get class overview with member name lists only (no detailed docs for each member).
+
+        By default, uses only TOC data (no Unreal query required, very lightweight).
+        Set include_doc=True to also fetch doc and bases from Unreal.
+
+        Args:
+            class_name: The class name
+            include_doc: If True, fetch doc and bases from Unreal (default: False)
+
+        Returns:
+            Dict with name, module, and member name lists (plus doc/bases if include_doc=True)
+        """
+        toc = self.load_toc()
+        if not toc:
+            return None
+
+        # Find class in TOC (check all categories)
+        class_data = None
+        for category in ["Class", "Struct", "Enum", "Native"]:
+            if class_name in toc.get(category, {}):
+                class_data = toc[category][class_name]
+                break
+
+        if not class_data:
+            return None
+
+        # Build overview from TOC data
+        overview = {
+            "name": class_name,
+            "module": class_data.get("module"),
+            "methods": class_data.get("func", []),
+            "class_methods": class_data.get("cls_func", []),
+            "properties": class_data.get("prop", []),
+            "constants": class_data.get("const", []),
+        }
+
+        # Optionally fetch basic info (doc, bases) from Unreal
+        if include_doc and self._unreal_connection is not None:
+            basic_info_json = self._unreal_connection.fetch_class_basic_info(class_name)
+            if basic_info_json:
+                try:
+                    basic_info = json.loads(basic_info_json)
+                    overview["doc"] = basic_info.get("doc", "")
+                    overview["bases"] = basic_info.get("bases", [])
+                except json.JSONDecodeError:
+                    pass
+
+        return overview
+
+    def get_member_info(self, class_name: str, member_name: str) -> dict | None:
+        """
+        Get detailed info for a specific member (method, property, or constant).
+
+        Args:
+            class_name: The class name
+            member_name: The member name
+
+        Returns:
+            Dict with member details (type, doc, signature, etc.)
+        """
+        if self._unreal_connection is None:
+            return None
+
+        member_json = self._unreal_connection.fetch_member_info(class_name, member_name)
+        if member_json:
+            try:
+                return json.loads(member_json)
+            except json.JSONDecodeError:
+                pass
+
+        return None
+
+    def get_members_info(self, class_name: str, member_names: list[str]) -> list[dict]:
+        """
+        Get detailed info for multiple members at once (batch operation).
+
+        Args:
+            class_name: The class name
+            member_names: List of member names to fetch
+
+        Returns:
+            List of member info dicts (skips members that couldn't be fetched)
+        """
+        results = []
+        for member_name in member_names:
+            member_info = self.get_member_info(class_name, member_name)
+            if member_info:
+                results.append(member_info)
+        return results

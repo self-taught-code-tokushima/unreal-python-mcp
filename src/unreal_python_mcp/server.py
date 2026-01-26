@@ -2,8 +2,8 @@
 MCP Server for Unreal Python API
 
 Provides:
-- Resources: llms-index (API documentation index), class docs
-- Tools: search_unreal_api, exec_unreal_python
+- Resources: llms-index (API documentation index), module/category indexes
+- Tools: search_unreal_api, get_class_overview, get_member_info, get_members_info, exec_unreal_python
 """
 
 from __future__ import annotations
@@ -153,21 +153,65 @@ def search_unreal_api(query: str) -> str:
 
 
 @mcp.tool()
-def get_unreal_class(class_name: str) -> str:
+def get_class_overview(class_name: str, include_doc: bool = False) -> str:
     """
-    Get detailed documentation for a specific Unreal Python class.
+    Get class overview with member name lists only (very lightweight).
 
-    Returns the class documentation including methods, properties,
-    inheritance information, and docstrings.
+    By default, returns only member NAMES without docstrings (fetched from TOC, no Unreal query).
+    Set include_doc=True to also fetch class docstring and base classes from Unreal.
+
+    Use get_member_info or get_members_info to get details for specific members.
+
+    This is much more efficient than fetching full documentation - especially
+    for large classes like Actor which would be 100KB+ with full details.
 
     Args:
         class_name: The exact class name (e.g., "Actor", "EditorAssetLibrary")
+        include_doc: If True, also fetch class docstring and bases (default: False)
     """
     cache = get_cache_manager()
-    doc = cache.get_class_doc(class_name)
-    if doc:
-        return json.dumps(doc, indent=2)
+    overview = cache.get_class_overview(class_name, include_doc=include_doc)
+    if overview:
+        return json.dumps(overview, indent=2)
     return json.dumps({"error": f"Class '{class_name}' not found. Use search_unreal_api to find the correct name."})
+
+
+@mcp.tool()
+def get_member_info(class_name: str, member_name: str) -> str:
+    """
+    Get detailed documentation for a specific member of a class.
+
+    Returns the member type (method/property/constant), docstring, signature (for methods),
+    and value (for constants).
+
+    Args:
+        class_name: The class name (e.g., "Actor")
+        member_name: The member name (e.g., "get_actor_location")
+    """
+    cache = get_cache_manager()
+    member_info = cache.get_member_info(class_name, member_name)
+    if member_info:
+        return json.dumps(member_info, indent=2)
+    return json.dumps({"error": f"Member '{member_name}' not found in class '{class_name}'."})
+
+
+@mcp.tool()
+def get_members_info(class_name: str, member_names: list[str]) -> str:
+    """
+    Get detailed documentation for multiple members at once (batch operation).
+
+    More efficient than calling get_member_info multiple times when you need
+    details for several members.
+
+    Args:
+        class_name: The class name (e.g., "Actor")
+        member_names: List of member names (e.g., ["get_actor_location", "set_actor_location"])
+    """
+    cache = get_cache_manager()
+    members_info = cache.get_members_info(class_name, member_names)
+    if members_info:
+        return json.dumps(members_info, indent=2)
+    return json.dumps({"error": f"No members found for class '{class_name}'."})
 
 
 @mcp.tool()
