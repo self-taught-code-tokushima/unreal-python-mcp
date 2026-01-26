@@ -33,6 +33,19 @@ Add to your Claude Code MCP configuration (`~/.config/claude/mcp.json` or projec
 }
 ```
 
+or
+
+```json
+{
+  "mcpServers": {
+    "unreal-python": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/self-taught-code-tokushima/unreal-python-mcp", "unreal-python-mcp"]
+    }
+  }
+}
+```
+
 ## Requirements
 
 - Python 3.13+
