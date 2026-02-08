@@ -52,6 +52,34 @@ or
 - Unreal Editor with Python plugin enabled
 - "Enable Remote Execution" checked in Editor Preferences > Plugins > Python
 
+## Custom Modules Support
+
+In addition to the built-in `unreal` module, you can document custom Python modules available in your Unreal Editor environment (e.g., `MaterialGraphEditor`).
+
+### Setup
+
+Add the `env` section to your MCP configuration with the `UNREAL_PYTHON_CUSTOM_MODULES` environment variable:
+
+```json
+{
+  "mcpServers": {
+    "unreal-python": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/self-taught-code-tokushima/unreal-python-mcp", "unreal-python-mcp"],
+      "env": {
+        "UNREAL_PYTHON_CUSTOM_MODULES": "YourCustomModule1,YourCustomModule2"
+      }
+    }
+  }
+}
+```
+
+### Notes
+
+- Specify multiple modules as comma-separated values
+- Custom modules will appear in the module list alongside built-in modules
+- Use `refresh_api_cache` to rebuild the cache after changing the module list
+
 ## Available Tools
 
 | Tool | Description |

@@ -9,6 +9,7 @@ Handles:
 
 from __future__ import annotations
 
+import os
 import socket
 from pathlib import Path
 
@@ -159,9 +160,16 @@ class UnrealConnection:
         """
         Fetch the API TOC (Table of Contents) from Unreal Editor.
 
+        Supports both unreal module and custom modules specified via
+        UNREAL_PYTHON_CUSTOM_MODULES environment variable.
+
         Returns:
             JSON string of the TOC, or None if failed
         """
+        # Get custom modules from environment variable
+        custom_modules_env = os.environ.get("UNREAL_PYTHON_CUSTOM_MODULES", "")
+        custom_modules = [m.strip() for m in custom_modules_env.split(",") if m.strip()]
+
         # build_toc.py の get_table_of_content_json() を実行
         # オリジナルの vscode-unreal-python/python/documentation/build_toc.py と同じロジック
         # Module 情報を追加して返す
@@ -196,7 +204,7 @@ def get_module_name(cls):
     return None
 
 class UnrealClassRepresentation:
-    def __init__(self, name, cls):
+    def __init__(self, name, cls, is_custom_module=False):
         self.name = name
         self.cls = cls
         self.module = get_module_name(cls)
@@ -204,6 +212,7 @@ class UnrealClassRepresentation:
         self.classmethods = []
         self.properties = []
         self.constants = []
+        self.is_custom_module = is_custom_module
         self.load_members()
 
     def load_members(self):
@@ -214,20 +223,37 @@ class UnrealClassRepresentation:
             if name not in self.cls.__dict__:
                 continue
 
-            if inspect.ismethoddescriptor(member):
-                self.methods.append(name)
-            elif inspect.isgetsetdescriptor(member):
-                self.properties.append(name)
-            elif issubclass(type(member), unreal.EnumBase):
-                self.properties.append(name)
-            elif issubclass(type(member), unreal.StructBase):
-                self.properties.append(name)
-            elif inspect.isbuiltin(member):
-                self.classmethods.append(name)
-            elif inspect.ismemberdescriptor(member):
-                self.properties.append(name)
-            elif isinstance(member, int):
-                self.constants.append(name)
+            if self.is_custom_module:
+                # Generic detection logic for custom modules
+                if isinstance(member, property):
+                    self.properties.append(name)
+                elif callable(member):
+                    # Check if it's a class method or static method
+                    if isinstance(inspect.getattr_static(self.cls, name), (classmethod, staticmethod)):
+                        self.classmethods.append(name)
+                    else:
+                        self.methods.append(name)
+                elif isinstance(member, (int, float, str, bool)):
+                    self.constants.append(name)
+                # If it's another type, treat as property
+                elif not inspect.ismodule(member) and not inspect.isclass(member):
+                    self.properties.append(name)
+            else:
+                # Original logic for unreal module classes
+                if inspect.ismethoddescriptor(member):
+                    self.methods.append(name)
+                elif inspect.isgetsetdescriptor(member):
+                    self.properties.append(name)
+                elif issubclass(type(member), unreal.EnumBase):
+                    self.properties.append(name)
+                elif issubclass(type(member), unreal.StructBase):
+                    self.properties.append(name)
+                elif inspect.isbuiltin(member):
+                    self.classmethods.append(name)
+                elif inspect.ismemberdescriptor(member):
+                    self.properties.append(name)
+                elif isinstance(member, int):
+                    self.constants.append(name)
 
     def get_dict(self):
         data = {}
@@ -282,9 +308,39 @@ toc = TableOfContents()
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     toc.load()
+
+# Process custom modules if specified
+custom_modules = __CUSTOM_MODULES_PLACEHOLDER__
+if custom_modules:
+    import sys
+    import importlib
+    for module_name in custom_modules:
+        try:
+            # Try to import the module if it's not already loaded
+            if module_name not in sys.modules:
+                importlib.import_module(module_name)
+
+            custom_module = sys.modules[module_name]
+            for object_name, obj in inspect.getmembers(custom_module):
+                if object_name.startswith("_"):
+                    continue
+                if inspect.isclass(obj):
+                    # Check if class is from this custom module
+                    if hasattr(obj, '__module__') and obj.__module__.startswith(module_name):
+                        classobject = UnrealClassRepresentation(object_name, obj, is_custom_module=True)
+                        # Override module to use custom module name
+                        classobject.module = module_name
+                        # Categorize as Native class (since not from unreal module)
+                        toc.natives.append(classobject)
+        except ImportError:
+            # Skip modules that cannot be imported
+            pass
+
 result = json.dumps(toc.get_dict(), separators=(',', ':'))
 print(result)
 '''
+        # Replace placeholder with actual custom modules list
+        code = code.replace("__CUSTOM_MODULES_PLACEHOLDER__", repr(custom_modules))
         output = self.execute(code)
 
         # 出力から JSON を抽出

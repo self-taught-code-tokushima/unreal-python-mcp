@@ -9,6 +9,8 @@ wheels/
 # Virtual environments
 .venv
 
-# Claude files to be ignored
+# LLM files to be ignored
 .mcp.json
-.claude/tmp/
+.claude/
+.gemini/
+.serena/

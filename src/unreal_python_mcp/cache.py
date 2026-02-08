@@ -334,6 +334,8 @@ class CacheManager:
         """
         Get a mapping of module names to class names.
 
+        Includes both Class and Native categories (Native includes custom modules).
+
         Returns:
             Dict mapping module name to list of class names
         """
@@ -342,11 +344,13 @@ class CacheManager:
             return {}
 
         modules: dict[str, list[str]] = defaultdict(list)
-        classes = toc.get("Class", {})
 
-        for class_name, class_data in classes.items():
-            module = class_data.get("module", "Other")
-            modules[module].append(class_name)
+        # Process both Class and Native categories
+        for category in ["Class", "Native"]:
+            classes = toc.get(category, {})
+            for class_name, class_data in classes.items():
+                module = class_data.get("module", "Other")
+                modules[module].append(class_name)
 
         # Sort class names within each module
         for module in modules:
@@ -450,9 +454,13 @@ class CacheManager:
             "",
         ]
 
-        classes = toc.get("Class", {})
+        # Get classes from both Class and Native categories
+        all_classes = {}
+        all_classes.update(toc.get("Class", {}))
+        all_classes.update(toc.get("Native", {}))
+
         for class_name in modules[module_name]:
-            class_data = classes.get(class_name, {})
+            class_data = all_classes.get(class_name, {})
             func_count = len(class_data.get("func", []))
             prop_count = len(class_data.get("prop", []))
             lines.append(f"- [{class_name}](/class/{class_name}): {func_count} methods, {prop_count} properties")
