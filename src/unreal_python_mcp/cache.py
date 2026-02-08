@@ -23,8 +23,8 @@ if TYPE_CHECKING:
 
 # Default cache directory
 def get_cache_dir() -> Path:
-    """Get the cache directory path."""
-    cache_dir = Path.home() / ".unreal-python-mcp" / "cache"
+    """Get the cache directory path in the current working directory (project-specific)."""
+    cache_dir = Path.cwd() / ".unreal-python-mcp" / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir
 

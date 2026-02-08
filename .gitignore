@@ -14,3 +14,6 @@ wheels/
 .claude/
 .gemini/
 .serena/
+
+# Cache directory (project-specific)
+.unreal-python-mcp/
