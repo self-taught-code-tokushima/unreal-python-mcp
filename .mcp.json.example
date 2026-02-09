@@ -3,6 +3,9 @@
         "unreal-python": {
             "command": "uv",
             "args": ["--directory", "D:\\UnrealProjects\\unreal-python-mcp", "run", "unreal-python-mcp"]
+            "env": {
+                "UNREAL_PYTHON_CUSTOM_MODULES": ""
+            }
         }
     }
 }
