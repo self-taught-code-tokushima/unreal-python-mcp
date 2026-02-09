@@ -74,11 +74,30 @@ Add the `env` section to your MCP configuration with the `UNREAL_PYTHON_CUSTOM_M
 }
 ```
 
+### Refreshing Cache with Custom Modules
+
+After configuring custom modules, refresh the cache to include them:
+
+```powershell
+# Windows PowerShell
+$env:UNREAL_PYTHON_CUSTOM_MODULES="MaterialGraphEditor,BlueprintGraphEditor"
+uvx unreal-python-mcp-refresh
+
+# Or with uv run
+$env:UNREAL_PYTHON_CUSTOM_MODULES="MaterialGraphEditor,BlueprintGraphEditor"
+uv run unreal-python-mcp-refresh
+```
+
+```bash
+# Linux/macOS
+UNREAL_PYTHON_CUSTOM_MODULES="MaterialGraphEditor,BlueprintGraphEditor" uvx unreal-python-mcp-refresh
+```
+
 ### Notes
 
 - Specify multiple modules as comma-separated values
 - Custom modules will appear in the module list alongside built-in modules
-- Use `refresh_api_cache` to rebuild the cache after changing the module list
+- The MCP server will automatically use the configured modules when it starts
 
 ## Available Tools
 
@@ -91,7 +110,7 @@ Add the `env` section to your MCP configuration with the `UNREAL_PYTHON_CUSTOM_M
 | `list_modules` | List available Unreal modules |
 | `exec_unreal_python` | Execute Python code in Unreal Editor |
 | `list_unreal_instances` | List available Unreal Editor instances |
-| `refresh_api_cache` | Refresh API documentation cache |
+| `refresh_api_cache` | Refresh API documentation cache (also available as CLI: `uvx unreal-python-mcp-refresh`) |
 
 ## Available Resources
 
@@ -166,8 +185,18 @@ Claude: [Uses exec_unreal_python("print('Hello World')")]
 ## First-time Setup
 
 1. Start Unreal Editor with a project
-2. Enable Python Remote Execution in Editor Preferences
-3. Use `refresh_api_cache` tool to fetch and cache the API documentation
+2. Enable Python Remote Execution in Editor Preferences (Editor Preferences > Plugins > Python > Enable Remote Execution)
+3. Refresh the API documentation cache:
+
+```powershell
+# Using uvx (recommended)
+uvx unreal-python-mcp-refresh
+
+# Or with uv run (if you cloned the repository)
+uv run unreal-python-mcp-refresh
+```
+
+Alternatively, you can use the `refresh_api_cache` MCP tool from Claude Code after connecting to the MCP server.
 
 ## Development
 
